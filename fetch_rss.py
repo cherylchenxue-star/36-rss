@@ -73,8 +73,15 @@ def fetch_financing_news():
             pub_date = datetime.fromtimestamp(pub_time_ms / 1000).isoformat() if pub_time_ms else datetime.now().isoformat()
 
             route = item.get('route', '')
+            item_id = item.get('itemId', '')
+
             if route.startswith('detail_newsflash'):
-                link = f"https://36kr.com/newsflashes/{item.get('itemId')}"
+                link = f"https://36kr.com/newsflashes/{item_id}"
+            elif route.startswith('detail_article'):
+                link = f"https://36kr.com/p/{item_id}"
+            elif route.startswith('detail_'):
+                # 其他 detail_ 类型的通用处理
+                link = f"https://36kr.com/{route.replace('detail_', '')}/{item_id}"
             else:
                 link = SOURCE_URL
 
