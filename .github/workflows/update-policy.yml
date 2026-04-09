@@ -2,8 +2,8 @@ name: 更新政府政策聚合 RSS
 
 on:
   schedule:
-    # 每天 08:00、14:00、20:00 运行 (UTC+8)
-    - cron: '0 0,6,12 * * *'
+    # 每天 06:00、14:00、22:00 运行 (UTC时间，对应北京时间 14:00、22:00、06:00)
+    - cron: '0 6,14,22 * * *'
   workflow_dispatch:
   push:
     branches: [main]
@@ -31,11 +31,12 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install requests beautifulsoup4 lxml
+        pip install requests beautifulsoup4 lxml urllib3
 
     - name: Fetch policy data
       run: |
         python policy_aggregator.py
+      timeout-minutes: 10
 
     - name: Setup Pages
       uses: actions/configure-pages@v4
