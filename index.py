@@ -83,11 +83,42 @@ def fetch_financing_news():
             else:
                 link = SOURCE_URL
 
+            # 提取企业信息（如果有 projectCard）
+            project_card = item.get('projectCard', {})
+            company_info = {}
+            if project_card:
+                company_info = {
+                    'name': project_card.get('name', ''),
+                    'brief': project_card.get('briefIntro', ''),
+                    'trades': [t.get('name', '') for t in project_card.get('tradeList', [])],
+                    'round': project_card.get('lastestFinancingRound', {}).get('name', ''),
+                    'city': project_card.get('city', {}).get('name', ''),
+                    'establish_time': project_card.get('establishTime', {}).get('name', ''),
+                }
+
+            # 构建描述内容
+            description = content or title
+            if company_info.get('name'):
+                company_desc = f"<p><strong>🏢 被投企业：{company_info['name']}</strong></p>"
+                if company_info.get('brief'):
+                    company_desc += f"<p>📋 企业简介：{company_info['brief']}</p>"
+                if company_info.get('trades'):
+                    company_desc += f"<p>🏭 行业类型：{'、'.join(company_info['trades'])}</p>"
+                if company_info.get('round'):
+                    company_desc += f"<p>💰 融资轮次：{company_info['round']}</p>"
+                if company_info.get('city'):
+                    company_desc += f"<p>📍 所在城市：{company_info['city']}</p>"
+                if company_info.get('establish_time'):
+                    company_desc += f"<p>📅 成立时间：{company_info['establish_time']}</p>"
+                company_desc += "<hr/>"
+                description = company_desc + description
+
             items.append({
                 'title': title,
                 'link': link,
                 'pub_date': pub_date,
-                'description': content or title,
+                'description': description,
+                'company': company_info,
             })
 
         items.sort(key=lambda x: x.get('pub_date', ''), reverse=True)
