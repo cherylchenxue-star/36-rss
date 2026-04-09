@@ -70,13 +70,16 @@ def fetch_financing_news():
             route = item.get('route', '')
             item_id = item.get('itemId', '')
 
-            if route.startswith('detail_newsflash'):
+            # 提取 route 主体（去掉 ?itemId=xxx 参数）
+            route_base = route.split('?')[0] if '?' in route else route
+
+            if route_base == 'detail_newsflash':
                 link = f"https://36kr.com/newsflashes/{item_id}"
-            elif route.startswith('detail_article'):
+            elif route_base == 'detail_article':
                 link = f"https://36kr.com/p/{item_id}"
-            elif route.startswith('detail_'):
+            elif route_base.startswith('detail_'):
                 # 其他 detail_ 类型的通用处理
-                link = f"https://36kr.com/{route.replace('detail_', '')}/{item_id}"
+                link = f"https://36kr.com/{route_base.replace('detail_', '')}/{item_id}"
             else:
                 link = SOURCE_URL
 
