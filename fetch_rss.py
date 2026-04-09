@@ -72,7 +72,7 @@ def fetch_financing_news():
 
             pub_date = datetime.fromtimestamp(pub_time_ms / 1000).isoformat() if pub_time_ms else datetime.now().isoformat()
 
-            route = item.get('route', ''))
+            route = item.get('route', '')
             if route.startswith('detail_newsflash'):
                 link = f"https://36kr.com/newsflashes/{item.get('itemId')}"
             else:
