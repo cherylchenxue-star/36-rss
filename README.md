@@ -1,22 +1,20 @@
 # 36kr 融资快讯 RSS
 
-持续抓取 [36kr PitchHub 融资快讯](https://pitchhub.36kr.com/financing-flash) 并生成 RSS feed，部署在 Vercel，无需本地运行。
+持续抓取 [36kr PitchHub 融资快讯](https://pitchhub.36kr.com/financing-flash) 并生成 RSS feed，通过 GitHub Pages 自动部署。
 
 ## 访问地址
 
 | 功能 | 地址 |
 |------|------|
-| 网页预览 | https://36-rss.vercel.app |
-| **RSS 订阅** | **https://36-rss.vercel.app/rss** |
-| API 接口 | https://36-rss.vercel.app/api/items |
-| 手动刷新 | https://36-rss.vercel.app/refresh |
+| 网页预览 | https://cherylchenxue-star.github.io/36-rss/ |
+| **RSS 订阅** | **https://cherylchenxue-star.github.io/36-rss/rss.xml** |
 
 ## 订阅方式
 
 将以下地址添加到 RSS 阅读器（Reeder、NetNewsWire、Feedly 等）：
 
 ```
-https://36-rss.vercel.app/rss
+https://cherylchenxue-star.github.io/36-rss/rss.xml
 ```
 
 ## 功能特性
