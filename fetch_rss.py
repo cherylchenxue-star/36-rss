@@ -161,36 +161,18 @@ def fetch_financing_news():
             investors = extract_investors(item, project_card)
             tags = extract_tags(item, material)
 
-            # 补充企业详细信息
-            company_brief = project_card.get('briefIntro', '')
-            company_trades = [t.get('name', '') for t in project_card.get('tradeList', []) if t.get('name')]
-            company_city = safe_get(project_card, 'city', 'name', default='')
-            company_establish_time = safe_get(project_card, 'establishTime', 'name', default='')
-
-            # 如果 projectCard 没有公司名，从标题兜底解析
+            # 如果 projectCard 没有公司名，仅尝试从引号中简单提取，避免误识别
             if not company_name:
-                m = re.search(r'[「"\'](.+?)[」"\']', title)
+                m = re.search(r'[“"「『]([^”"」』]{2,20})[”"」』]', title)
                 if m:
                     company_name = m.group(1)
-                else:
-                    m = re.search(r'^([\u4e00-\u9fa5]{2,8})', title)
-                    if m:
-                        company_name = m.group(1)
 
             # 构建描述内容
             desc_parts = []
             if company_name:
                 desc_parts.append(f"<p><strong>🏢 被投企业：</strong>{company_name}</p>")
-            if company_brief:
-                desc_parts.append(f"<p>📋 企业简介：{company_brief}</p>")
-            if company_trades:
-                desc_parts.append(f"<p>🏭 行业类型：{'、'.join(company_trades)}</p>")
             if round_name:
                 desc_parts.append(f"<p><strong>🔄 融资轮次：</strong>{round_name}</p>")
-            if company_city:
-                desc_parts.append(f"<p>📍 所在城市：{company_city}</p>")
-            if company_establish_time:
-                desc_parts.append(f"<p>📅 成立时间：{company_establish_time}</p>")
             if investors:
                 desc_parts.append(f"<p><strong>💼 投资方：</strong>{'、'.join(investors)}</p>")
             if tags:
@@ -209,10 +191,7 @@ def fetch_financing_news():
                 'round': round_name,
                 'investors': investors,
                 'tags': tags,
-                'company_brief': company_brief,
-                'company_trades': company_trades,
-                'company_city': company_city,
-                'company_establish_time': company_establish_time,
+                'content': content,
             })
 
         items.sort(key=lambda x: x.get('pub_date', ''), reverse=True)
@@ -287,55 +266,120 @@ def main():
     with open('public/rss.xml', 'w', encoding='utf-8') as f:
         f.write(rss_content)
 
-    # 同时生成一个HTML预览页
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>36kr 融资快讯 RSS</title>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; background: #f5f7fa; }}
-        h1 {{ color: #1a1a1a; }}
-        .info {{ background: white; padding: 25px; border-radius: 12px; margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
-        .rss-link {{ background: #1a73e8; color: white; padding: 10px 20px; border-radius: 6px; display: inline-block; margin: 10px 0; text-decoration: none; }}
-        .item {{ background: white; padding: 15px; border-radius: 8px; margin: 10px 0; }}
-        .item-title {{ font-weight: bold; color: #1a1a1a; }}
-        .item-time {{ color: #666; font-size: 14px; }}
-        .item-meta {{ color: #888; font-size: 13px; margin-top: 5px; }}
-    </style>
-</head>
-<body>
-    <h1>📰 36kr 融资快讯 RSS</h1>
-    <div class="info">
-        <p>当前数据: <strong>{len(items)}</strong> 条</p>
-        <p>最后更新: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-        <a href="rss.xml" class="rss-link">📡 RSS 订阅</a>
-    </div>
-    <h2>最新数据</h2>
-"""
+    # 生成时间轴 HTML 预览页
+    timeline_items = []
+    for idx, item in enumerate(items[:50]):
+        try:
+            dt = datetime.fromisoformat(item['pub_date'].replace('Z', '+00:00'))
+            date_str = dt.strftime('%Y-%m-%d')
+            time_str = dt.strftime('%H:%M')
+        except:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+            time_str = datetime.now().strftime('%H:%M')
 
-    for item in items[:10]:
-        pub_time = item['pub_date'][:16] if len(item['pub_date']) > 16 else item['pub_date']
+        tags_html = ""
+        for tag in item.get('tags', [])[:4]:
+            tags_html += f'<span class="px-2 py-0.5 bg-blue-50 text-blue-600 text-xs rounded-full">{tag}</span>'
+
         meta = []
         if item.get('company'):
             meta.append(f"🏢 {item['company']}")
+        if item.get('round'):
+            meta.append(f"🔄 {item['round']}")
         if item.get('investors'):
             meta.append(f"💼 {'、'.join(item['investors'][:3])}")
-        if item.get('tags'):
-            meta.append(f"🏷️ {'、'.join(item['tags'][:3])}")
-        meta_html = " | ".join(meta) if meta else ""
-        html += f"""
-    <div class="item">
-        <div class="item-title">{item['title']}</div>
-        <div class="item-time">{pub_time}</div>
-        <div class="item-meta">{meta_html}</div>
-    </div>
-"""
+        meta_html = " · ".join(meta) if meta else ""
 
-    html += """
-    <p style="text-align: center; color: #999; margin-top: 40px;">
-        数据来源于: <a href="https://pitchhub.36kr.com/financing-flash">36kr PitchHub</a>
+        summary = item.get('content', '')
+        # 摘要控制在 160 字以内
+        if len(summary) > 160:
+            summary = summary[:160] + "…"
+
+        side_class = "md:flex-row" if idx % 2 == 0 else "md:flex-row-reverse"
+        date_align = "md:text-right md:pr-8" if idx % 2 == 0 else "md:text-left md:pl-8"
+        card_align = "md:pl-8" if idx % 2 == 0 else "md:pr-8"
+
+        timeline_items.append(f"""
+        <div class="relative flex flex-col {side_class} items-start md:items-stretch mb-8 md:mb-0 md:min-h-[120px]">
+          <!-- 桌面端日期 -->
+          <div class="hidden md:block md:w-1/2 {date_align} pt-1">
+            <div class="text-sm font-semibold text-blue-600">{time_str}</div>
+            <div class="text-xs text-slate-400">{date_str}</div>
+          </div>
+          <!-- 圆点 -->
+          <div class="absolute left-3 md:left-1/2 md:-translate-x-1/2 top-1 w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow z-10"></div>
+          <!-- 内容卡片 -->
+          <div class="pl-10 md:pl-0 md:w-1/2 {card_align} pb-8">
+            <!-- 移动端日期 -->
+            <div class="md:hidden mb-1">
+              <div class="text-sm font-semibold text-blue-600">{time_str}</div>
+              <div class="text-xs text-slate-400">{date_str}</div>
+            </div>
+            <div class="bg-white rounded-xl p-5 shadow-sm hover:shadow-md transition border border-slate-100">
+              <a href="{item['link']}" target="_blank" class="block text-base font-bold text-slate-900 hover:text-blue-600 mb-2 leading-snug">{item['title']}</a>
+              <div class="flex flex-wrap gap-2 mb-2">{tags_html}</div>
+              <div class="text-xs text-slate-500 mb-2">{meta_html}</div>
+              <p class="text-sm text-slate-600 leading-relaxed">{summary}</p>
+            </div>
+          </div>
+        </div>
+        """)
+
+    timeline_html = "\n".join(timeline_items)
+
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>36kr 融资快讯 RSS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+  <style>
+    .timeline-line {{
+      position: absolute;
+      left: 0.875rem;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom, #bfdbfe, #60a5fa, transparent);
+    }}
+    @media (min-width: 768px) {{
+      .timeline-line {{
+        left: 50%;
+        transform: translateX(-50%);
+      }}
+    }}
+  </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-100 text-slate-800 min-h-screen">
+  <div class="max-w-5xl mx-auto px-4 py-12">
+    <!-- Header -->
+    <div class="text-center mb-12">
+      <h1 class="text-3xl font-bold text-slate-900 mb-2">36kr 融资快讯</h1>
+      <p class="text-slate-500 mb-6">最新一级市场股权融资动态</p>
+      <div class="inline-flex flex-wrap items-center justify-center gap-3 bg-white px-6 py-3 rounded-full shadow-sm">
+        <span class="text-sm text-slate-600">当前数据: <strong class="text-slate-900">{len(items)}</strong> 条</span>
+        <span class="hidden sm:inline w-px h-4 bg-slate-200"></span>
+        <span class="text-sm text-slate-400">更新于 {datetime.now().strftime('%Y-%m-%d %H:%M')}</span>
+      </div>
+      <div class="mt-5">
+        <a href="rss.xml" class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-full text-sm font-medium transition shadow-sm">
+          <i class="fa fa-rss"></i> RSS 订阅
+        </a>
+      </div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="relative">
+      <div class="timeline-line"></div>
+      {timeline_html}
+    </div>
+
+    <p class="text-center text-slate-400 text-sm mt-8 pb-8">
+      数据来源于 <a href="https://pitchhub.36kr.com/financing-flash" class="text-blue-600 hover:underline">36kr PitchHub</a>
     </p>
+  </div>
 </body>
 </html>"""
 
@@ -343,6 +387,7 @@ def main():
         f.write(html)
 
     print(f"[OK] RSS已生成: public/rss.xml")
+    print(f"[OK] 时间轴预览页已生成: public/index.html")
     print(f"[OK] 共 {len(items)} 条数据")
 
 
