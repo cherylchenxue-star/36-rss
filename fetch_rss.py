@@ -14,6 +14,82 @@ import os
 SOURCE_URL = 'https://pitchhub.36kr.com/financing-flash'
 
 
+def safe_get(obj, *keys, default=""):
+    """安全多级字典取值"""
+    for k in keys:
+        if isinstance(obj, dict) and k in obj:
+            obj = obj[k]
+        else:
+            return default
+    return obj if obj is not None else default
+
+
+def extract_investors(item, project_card):
+    """从多个可能位置提取投资方列表"""
+    investors = []
+    # 可能路径 1: projectCard -> lastestFinancingRound -> investorList
+    inv_list = safe_get(project_card, "lastestFinancingRound", "investorList", default=[])
+    if inv_list:
+        for inv in inv_list:
+            name = inv.get("name") or inv.get("investorName")
+            if name:
+                investors.append(name)
+    # 可能路径 2: item 根级别的 investorList / investors
+    if not investors:
+        for key in ("investorList", "investors", "investorNameList"):
+            raw = item.get(key, [])
+            if isinstance(raw, list):
+                for r in raw:
+                    if isinstance(r, dict):
+                        name = r.get("name") or r.get("investorName")
+                        if name:
+                            investors.append(name)
+                    elif isinstance(r, str):
+                        investors.append(r)
+    # 可能路径 3: financingInfo -> investorList
+    if not investors:
+        inv_list = safe_get(item, "financingInfo", "investorList", default=[])
+        for inv in inv_list:
+            name = inv.get("name") or inv.get("investorName")
+            if name:
+                investors.append(name)
+    return list(dict.fromkeys(investors))  # 去重保序
+
+
+def extract_tags(item, material):
+    """提取智能标签/行业标签"""
+    tags = []
+    # 可能路径 1: item.tagList / tags / industries
+    for key in ("tagList", "tags", "industries", "keywordList"):
+        raw = item.get(key, [])
+        if isinstance(raw, list):
+            for r in raw:
+                if isinstance(r, dict):
+                    name = r.get("name") or r.get("tagName") or r.get("label")
+                    if name:
+                        tags.append(name)
+                elif isinstance(r, str):
+                    tags.append(r)
+    # 可能路径 2: material.tagList
+    if not tags:
+        raw = material.get("tagList", [])
+        for r in raw:
+            if isinstance(r, dict):
+                name = r.get("name") or r.get("tagName")
+                if name:
+                    tags.append(name)
+            elif isinstance(r, str):
+                tags.append(r)
+    # 可能路径 3: projectCard.tradeList 作为行业标签兜底
+    if not tags:
+        trades = safe_get(item, "projectCard", "tradeList", default=[])
+        for t in trades:
+            name = t.get("name")
+            if name:
+                tags.append(name)
+    return list(dict.fromkeys(tags))
+
+
 def fetch_financing_news():
     """抓取融资快讯"""
     headers = {
@@ -26,10 +102,9 @@ def fetch_financing_news():
         response = requests.get(SOURCE_URL, headers=headers, timeout=30)
         response.encoding = response.apparent_encoding
 
-        # 从 __INIT_PROPS__ 中提取
         props_start = response.text.find('window.__INIT_PROPS__ = ')
         if props_start == -1:
-            print("[ERROR] 未找到数据")
+            print("[ERROR] 未找到 __INIT_PROPS__ 数据")
             return []
 
         json_start = props_start + len('window.__INIT_PROPS__ = ')
@@ -65,17 +140,10 @@ def fetch_financing_news():
             if not title:
                 continue
 
-            # 只保留含"AI"、"人工智能"、"大模型"的标题（可选过滤）
-            # keywords = ['AI', '人工智能', '大模型', '智能', '机器人', '算法']
-            # if not any(kw in title for kw in keywords):
-            #     continue
-
             pub_date = datetime.fromtimestamp(pub_time_ms / 1000).isoformat() if pub_time_ms else datetime.now().isoformat()
 
             route = item.get('route', '')
             item_id = item.get('itemId', '')
-
-            # 提取 route 主体（去掉 ?itemId=xxx 参数）
             route_base = route.split('?')[0] if '?' in route else route
 
             if route_base == 'detail_newsflash':
@@ -83,57 +151,78 @@ def fetch_financing_news():
             elif route_base == 'detail_article':
                 link = f"https://36kr.com/p/{item_id}"
             elif route_base.startswith('detail_'):
-                # 其他 detail_ 类型的通用处理
                 link = f"https://36kr.com/{route_base.replace('detail_', '')}/{item_id}"
             else:
                 link = SOURCE_URL
 
-            # 提取企业信息（如果有 projectCard）
             project_card = item.get('projectCard', {})
-            company_info = {}
-            if project_card:
-                company_info = {
-                    'name': project_card.get('name', ''),
-                    'brief': project_card.get('briefIntro', ''),
-                    'trades': [t.get('name', '') for t in project_card.get('tradeList', [])],
-                    'round': project_card.get('lastestFinancingRound', {}).get('name', ''),
-                    'city': project_card.get('city', {}).get('name', ''),
-                    'establish_time': project_card.get('establishTime', {}).get('name', ''),
-                }
+            company_name = project_card.get('name', '')
+            round_name = safe_get(project_card, "lastestFinancingRound", "name", default="")
+            investors = extract_investors(item, project_card)
+            tags = extract_tags(item, material)
+
+            # 补充企业详细信息
+            company_brief = project_card.get('briefIntro', '')
+            company_trades = [t.get('name', '') for t in project_card.get('tradeList', []) if t.get('name')]
+            company_city = safe_get(project_card, 'city', 'name', default='')
+            company_establish_time = safe_get(project_card, 'establishTime', 'name', default='')
+
+            # 如果 projectCard 没有公司名，从标题兜底解析
+            if not company_name:
+                m = re.search(r'[「"\'](.+?)[」"\']', title)
+                if m:
+                    company_name = m.group(1)
+                else:
+                    m = re.search(r'^([\u4e00-\u9fa5]{2,8})', title)
+                    if m:
+                        company_name = m.group(1)
 
             # 构建描述内容
-            description = content or title
-            if company_info.get('name'):
-                # 添加企业信息到描述
-                company_desc = f"<p><strong>🏢 被投企业：{company_info['name']}</strong></p>"
-                if company_info.get('brief'):
-                    company_desc += f"<p>📋 企业简介：{company_info['brief']}</p>"
-                if company_info.get('trades'):
-                    company_desc += f"<p>🏭 行业类型：{'、'.join(company_info['trades'])}</p>"
-                if company_info.get('round'):
-                    company_desc += f"<p>💰 融资轮次：{company_info['round']}</p>"
-                if company_info.get('city'):
-                    company_desc += f"<p>📍 所在城市：{company_info['city']}</p>"
-                if company_info.get('establish_time'):
-                    company_desc += f"<p>📅 成立时间：{company_info['establish_time']}</p>"
-                company_desc += "<hr/>"
-                description = company_desc + description
+            desc_parts = []
+            if company_name:
+                desc_parts.append(f"<p><strong>🏢 被投企业：</strong>{company_name}</p>")
+            if company_brief:
+                desc_parts.append(f"<p>📋 企业简介：{company_brief}</p>")
+            if company_trades:
+                desc_parts.append(f"<p>🏭 行业类型：{'、'.join(company_trades)}</p>")
+            if round_name:
+                desc_parts.append(f"<p><strong>🔄 融资轮次：</strong>{round_name}</p>")
+            if company_city:
+                desc_parts.append(f"<p>📍 所在城市：{company_city}</p>")
+            if company_establish_time:
+                desc_parts.append(f"<p>📅 成立时间：{company_establish_time}</p>")
+            if investors:
+                desc_parts.append(f"<p><strong>💼 投资方：</strong>{'、'.join(investors)}</p>")
+            if tags:
+                desc_parts.append(f"<p><strong>🏷️ 标签：</strong>{'、'.join(tags)}</p>")
+            if content:
+                desc_parts.append(f"<hr/><p>{content}</p>")
+
+            description = "".join(desc_parts) if desc_parts else (content or title)
 
             items.append({
                 'title': title,
                 'link': link,
                 'pub_date': pub_date,
                 'description': description,
-                'company': company_info,
+                'company': company_name,
+                'round': round_name,
+                'investors': investors,
+                'tags': tags,
+                'company_brief': company_brief,
+                'company_trades': company_trades,
+                'company_city': company_city,
+                'company_establish_time': company_establish_time,
             })
 
-        # 按时间倒序
         items.sort(key=lambda x: x.get('pub_date', ''), reverse=True)
         print(f"[OK] 抓取到 {len(items)} 条数据")
         return items
 
     except Exception as e:
         print(f"[ERROR] 抓取失败: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
@@ -151,12 +240,17 @@ def generate_rss(items):
 
         guid = hash(f"{item['title']}{item['link']}")
 
+        # 标签作为 category 输出
+        categories_xml = ""
+        for tag in item.get('tags', [])[:5]:
+            categories_xml += f"\n            <category><![CDATA[{tag}]]></category>"
+
         items_xml += f"""
         <item>
             <title><![CDATA[{item['title']}]]></title>
             <link>{item['link']}</link>
             <guid isPermaLink="false">{guid}</guid>
-            <pubDate>{pub_date_str}</pubDate>
+            <pubDate>{pub_date_str}</pubDate>{categories_xml}
             <description><![CDATA[{item.get('description', item['title'])}]]></description>
         </item>
         """
@@ -180,17 +274,14 @@ def generate_rss(items):
 def main():
     print(f"[{datetime.now()}] 开始抓取...")
 
-    # 抓取数据
     items = fetch_financing_news()
 
     if not items:
         print("[ERROR] 没有获取到数据")
         return
 
-    # 生成RSS
     rss_content = generate_rss(items)
 
-    # 保存到 public 目录（GitHub Pages用）
     os.makedirs('public', exist_ok=True)
 
     with open('public/rss.xml', 'w', encoding='utf-8') as f:
@@ -210,6 +301,7 @@ def main():
         .item {{ background: white; padding: 15px; border-radius: 8px; margin: 10px 0; }}
         .item-title {{ font-weight: bold; color: #1a1a1a; }}
         .item-time {{ color: #666; font-size: 14px; }}
+        .item-meta {{ color: #888; font-size: 13px; margin-top: 5px; }}
     </style>
 </head>
 <body>
@@ -224,10 +316,19 @@ def main():
 
     for item in items[:10]:
         pub_time = item['pub_date'][:16] if len(item['pub_date']) > 16 else item['pub_date']
+        meta = []
+        if item.get('company'):
+            meta.append(f"🏢 {item['company']}")
+        if item.get('investors'):
+            meta.append(f"💼 {'、'.join(item['investors'][:3])}")
+        if item.get('tags'):
+            meta.append(f"🏷️ {'、'.join(item['tags'][:3])}")
+        meta_html = " | ".join(meta) if meta else ""
         html += f"""
     <div class="item">
         <div class="item-title">{item['title']}</div>
         <div class="item-time">{pub_time}</div>
+        <div class="item-meta">{meta_html}</div>
     </div>
 """
 
