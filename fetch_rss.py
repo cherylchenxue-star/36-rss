@@ -56,8 +56,57 @@ def extract_investors(item, project_card):
     return list(dict.fromkeys(investors))  # 去重保序
 
 
+SMART_TAG_KEYWORDS = {
+    "人工智能": ["人工智能", "AI", "AIGC", "生成式AI", "大模型", "机器学习", "深度学习", "算法", "神经网络", "智能算力", "NLP", "计算机视觉", "CV", "多模态"],
+    "机器人": ["机器人", "人形机器人", "具身智能", "工业机器人", "服务机器人", "扫地机器人", "无人机", "机械臂", "灵巧手"],
+    "半导体": ["半导体", "芯片", "集成电路", "晶圆", "EDA", "封测", "光刻", "先进制程", "GPU", "MCU", "传感器芯片"],
+    "新能源": ["新能源", "光伏", "风电", "储能", "氢能", "锂电池", "动力电池", "充电桩", "清洁能源", "钠电池", "固态电池"],
+    "电动汽车": ["新能源汽车", "电动车", "电动汽车", "智能网联汽车", "自动驾驶", "车联网", "智能驾驶", "辅助驾驶", "激光雷达"],
+    "航空航天": ["航空航天", "商业航天", "卫星", "火箭", "eVTOL", "低空经济", "大飞机", "航空发动机", "航天器"],
+    "生物医药": ["生物医药", "医疗器械", "创新药", "疫苗", "基因治疗", "CXO", "医疗健康", "数字医疗", "体外诊断", "手术机器人"],
+    "金融科技": ["金融科技", "数字金融", "区块链", "数字货币", "支付", "普惠金融", "保险科技", "财富管理"],
+    "企业服务": ["企业服务", "SaaS", "云计算", "大数据", "低代码", "数字化转型", "协同办公", "CRM", "ERP", "RPA"],
+    "先进制造": ["先进制造", "智能制造", "工业互联网", "高端装备", "3D打印", "增材制造", "工业软件", "数控机床"],
+    "新材料": ["新材料", "复合材料", "化工材料", "稀土", "高性能纤维", "纳米材料", "石墨烯", "碳纤维"],
+    "物联网/硬件": ["物联网", "IoT", "智能硬件", "智能家居", "可穿戴设备", "传感器", "智能穿戴", "VR", "AR", "MR"],
+    "消费零售": ["新零售", "电商", "跨境电商", "直播带货", "新消费", "食品饮料", "美妆", "个护", "潮玩", "宠物经济"],
+    "教育": ["教育", "在线教育", "职业教育", "素质教育", "教育科技", "K12", "EdTech", "智慧教育"],
+    "文娱游戏": ["游戏", "电竞", "影视", "动漫", "文创", "短视频", "直播", "音乐", "体育", "剧本杀", "密室逃脱"],
+    "物流供应链": ["物流", "供应链", "仓储", "快递", "冷链", "即时配送", "智慧物流", "供应链金融科技"],
+    "农业科技": ["农业", "智慧农业", "农机", "乡村振兴", "预制菜", "种业", "养殖", "农产品"],
+    "能源电力": ["电力", "电网", "核电", "火电", "水电", "输配电", "虚拟电厂", "特高压", "智慧电网"],
+    "环保双碳": ["环保", "双碳", "碳中和", "碳达峰", "节能减排", "循环经济", "绿色金融", "碳交易", "污染治理"],
+    "汽车出行": ["汽车", "整车", "零部件", "二手车", "共享出行", "网约车", "租车", "汽车后市场"],
+    "本地生活": ["本地生活", "餐饮", "外卖", "酒旅", "民宿", "社区团购", "生鲜电商", "到家服务"],
+    "出海/全球化": ["出海", "全球化", "跨境", "外贸", "一带一路", "国际化", "海外市场"],
+    "建筑地产": ["房地产", "建筑", "建材", "智慧城市", "物业管理", "家装", "室内设计"],
+    "网络安全": ["网络安全", "信息安全", "数据安全", "隐私计算", "密码学", "零信任", "态势感知"],
+}
+
+
+def extract_smart_tags(text: str, trade_list: list = None):
+    """基于标题+正文关键词匹配提取智能标签，并合并结构化行业标签"""
+    if not text:
+        text = ""
+    text_lower = text.lower()
+    tags = []
+    for tag, keywords in SMART_TAG_KEYWORDS.items():
+        for kw in keywords:
+            if kw.lower() in text_lower:
+                tags.append(tag)
+                break
+    # 合并 projectCard.tradeList 中的结构化标签
+    if trade_list:
+        for t in trade_list:
+            name = t.get("name") if isinstance(t, dict) else t
+            if name and isinstance(name, str):
+                tags.append(name)
+    # 去重保序，最多6个
+    return list(dict.fromkeys(tags))[:6]
+
+
 def extract_tags(item, material):
-    """提取智能标签/行业标签"""
+    """提取智能标签/行业标签（兼容旧版结构化字段 + 新版关键词）"""
     tags = []
     # 可能路径 1: item.tagList / tags / industries
     for key in ("tagList", "tags", "industries", "keywordList"):
@@ -80,7 +129,7 @@ def extract_tags(item, material):
                     tags.append(name)
             elif isinstance(r, str):
                 tags.append(r)
-    # 可能路径 3: projectCard.tradeList 作为行业标签兜底
+    # 可能路径 3: projectCard.tradeList 作为兜底
     if not tags:
         trades = safe_get(item, "projectCard", "tradeList", default=[])
         for t in trades:
@@ -159,7 +208,15 @@ def fetch_financing_news():
             company_name = project_card.get('name', '')
             round_name = safe_get(project_card, "lastestFinancingRound", "name", default="")
             investors = extract_investors(item, project_card)
-            tags = extract_tags(item, material)
+
+            # 智能标签：先通过关键词+tradeList提取，再合并结构化标签
+            trades = safe_get(project_card, "tradeList", default=[])
+            tags = extract_smart_tags(f"{title} {content}", trades)
+            structured_tags = extract_tags(item, material)
+            for t in structured_tags:
+                if t not in tags:
+                    tags.append(t)
+            tags = tags[:6]
 
             # 如果 projectCard 没有公司名，仅尝试从引号中简单提取，避免误识别
             if not company_name:
