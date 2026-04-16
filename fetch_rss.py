@@ -6,7 +6,7 @@
 """
 
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import re
 import json
 import os
@@ -189,7 +189,10 @@ def fetch_financing_news():
             if not title:
                 continue
 
-            pub_date = datetime.fromtimestamp(pub_time_ms / 1000).isoformat() if pub_time_ms else datetime.now().isoformat()
+            if pub_time_ms:
+                pub_date = datetime.fromtimestamp(pub_time_ms / 1000, tz=timezone.utc).isoformat()
+            else:
+                pub_date = datetime.now(timezone.utc).isoformat()
 
             route = item.get('route', '')
             item_id = item.get('itemId', '')
@@ -270,9 +273,12 @@ def generate_rss(items):
         pub_date = item.get('pub_date', datetime.now().isoformat())
         try:
             dt = datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
-            pub_date_str = dt.strftime('%a, %d %b %Y %H:%M:%S +0800')
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt_cst = dt.astimezone(timezone(timedelta(hours=8)))
+            pub_date_str = dt_cst.strftime('%a, %d %b %Y %H:%M:%S +0800')
         except:
-            pub_date_str = datetime.now().strftime('%a, %d %b %Y %H:%M:%S +0800')
+            pub_date_str = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).strftime('%a, %d %b %Y %H:%M:%S +0800')
 
         guid = hash(f"{item['title']}{item['link']}")
 
@@ -298,7 +304,7 @@ def generate_rss(items):
         <link>{SOURCE_URL}</link>
         <description>36氪 PitchHub 最新一级市场股权融资动态</description>
         <language>zh-CN</language>
-        <lastBuildDate>{datetime.now().strftime('%a, %d %b %Y %H:%M:%S +0800')}</lastBuildDate>
+        <lastBuildDate>{datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).strftime('%a, %d %b %Y %H:%M:%S +0800')}</lastBuildDate>
         <generator>36kr RSS Generator</generator>
         {items_xml}
     </channel>
@@ -308,7 +314,7 @@ def generate_rss(items):
 
 
 def main():
-    print(f"[{datetime.now()}] 开始抓取...")
+    print(f"[{datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).isoformat()}] 开始抓取...")
 
     items = fetch_financing_news()
 
@@ -328,11 +334,15 @@ def main():
     for idx, item in enumerate(items[:50]):
         try:
             dt = datetime.fromisoformat(item['pub_date'].replace('Z', '+00:00'))
-            date_str = dt.strftime('%Y-%m-%d')
-            time_str = dt.strftime('%H:%M')
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt_cst = dt.astimezone(timezone(timedelta(hours=8)))
+            date_str = dt_cst.strftime('%Y-%m-%d')
+            time_str = dt_cst.strftime('%H:%M')
         except:
-            date_str = datetime.now().strftime('%Y-%m-%d')
-            time_str = datetime.now().strftime('%H:%M')
+            now_cst = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8)))
+            date_str = now_cst.strftime('%Y-%m-%d')
+            time_str = now_cst.strftime('%H:%M')
 
         tags_html = ""
         for tag in item.get('tags', [])[:4]:
@@ -418,13 +428,17 @@ def main():
       <div class="inline-flex flex-wrap items-center justify-center gap-3 bg-white px-6 py-3 rounded-full shadow-sm">
         <span class="text-sm text-slate-600">当前数据: <strong class="text-slate-900">{len(items)}</strong> 条</span>
         <span class="hidden sm:inline w-px h-4 bg-slate-200"></span>
-        <span class="text-sm text-slate-400">更新于 {datetime.now().strftime('%Y-%m-%d %H:%M')}</span>
+        <span class="text-sm text-slate-400">更新于 {datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M')}</span>
       </div>
-      <div class="mt-5">
+      <div class="mt-5 flex flex-wrap items-center justify-center gap-3">
         <a href="rss.xml" class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-full text-sm font-medium transition shadow-sm">
           <i class="fa fa-rss"></i> RSS 订阅
         </a>
+        <a href="https://github.com/cherylchenxue-star/36-rss/actions/workflows/update-rss.yml" target="_blank" class="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white px-5 py-2 rounded-full text-sm font-medium transition shadow-sm">
+          <i class="fa fa-refresh"></i> 手动刷新
+        </a>
       </div>
+      <p class="text-xs text-slate-400 mt-2">手动刷新将跳转 GitHub Actions 执行最新抓取</p>
     </div>
 
     <!-- Timeline -->
