@@ -183,7 +183,8 @@ def fetch_financing_news():
         for item in item_list:
             material = item.get('templateMaterial', {})
             title = material.get('widgetTitle', '')
-            content = material.get('widgetContent', '')
+            raw_content = material.get('widgetContent', '')
+            content = raw_content
             pub_time_ms = material.get('publishTime', 0)
 
             if not title:
@@ -226,6 +227,13 @@ def fetch_financing_news():
                 m = re.search(r'[“"「『]([^”"」』]{2,20})[”"」』]', title)
                 if m:
                     company_name = m.group(1)
+
+            # detail_article 的 widgetContent 经常是完全不相关的推荐语，需要过滤
+            if route_base == 'detail_article' and content:
+                has_company = company_name and company_name in content
+                has_funding = any(kw in content for kw in ['融资', '轮', '投资', '领投', '跟投', '获', '完成', '亿元', '万美元'])
+                if not (has_company or has_funding):
+                    content = ''
 
             # 构建描述内容
             desc_parts = []
