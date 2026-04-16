@@ -312,16 +312,18 @@ def fetch_financing_news():
             round_name = safe_get(project_card, "lastestFinancingRound", "name", default="")
             investors = extract_investors(item, project_card)
 
-            # detail_article 需要从详情页抓取真正正文，并从中提取投资方
+            # detail_article 需要从详情页抓取真正正文
             if route_base == 'detail_article' and item_id:
                 article_text = fetch_article_content(item_id)
                 if article_text:
                     content = article_text
-                    # 从正文中补充投资机构
-                    text_investors = extract_investors_from_text(article_text)
-                    for inv in text_investors:
-                        if inv not in investors:
-                            investors.append(inv)
+
+            # 从正文/摘要中补充投资机构（newsflash 和 article 都适用）
+            if content:
+                text_investors = extract_investors_from_text(content)
+                for inv in text_investors:
+                    if inv not in investors:
+                        investors.append(inv)
 
             # 智能标签：先通过关键词+tradeList提取，再合并结构化标签
             trades = safe_get(project_card, "tradeList", default=[])
@@ -418,18 +420,30 @@ def generate_rss(items):
         for tag in item.get('tags', [])[:5]:
             categories_xml += f"\n            <category><![CDATA[{tag}]]></category>"
 
+        # 投资方单独列出（自定义命名空间）
+        investors_xml = ""
+        for inv in item.get('investors', [])[:10]:
+            investors_xml += f"\n            <kr:investor><![CDATA[{inv}]]></kr:investor>"
+
+        # 公司名和轮次也单独输出
+        extra_xml = ""
+        if item.get('company'):
+            extra_xml += f"\n            <kr:company><![CDATA[{item['company']}]]></kr:company>"
+        if item.get('round'):
+            extra_xml += f"\n            <kr:round><![CDATA[{item['round']}]]></kr:round>"
+
         items_xml += f"""
         <item>
             <title><![CDATA[{item['title']}]]></title>
             <link>{item['link']}</link>
             <guid isPermaLink="false">{guid}</guid>
-            <pubDate>{pub_date_str}</pubDate>{categories_xml}
+            <pubDate>{pub_date_str}</pubDate>{categories_xml}{extra_xml}{investors_xml}
             <description><![CDATA[{item.get('description', item['title'])}]]></description>
         </item>
         """
 
     rss = f"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:kr="https://36kr.com/rss-extension">
     <channel>
         <title>36kr 融资快讯</title>
         <link>{SOURCE_URL}</link>
