@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 import re
 import json
 import os
+from bs4 import BeautifulSoup
 
 SOURCE_URL = 'https://pitchhub.36kr.com/financing-flash'
 
@@ -139,6 +140,104 @@ def extract_tags(item, material):
     return list(dict.fromkeys(tags))
 
 
+def clean_article_text(text):
+    """清理 mobile 文章页尾部杂质并截断摘要"""
+    if not text:
+        return text
+    # 切除常见尾部模板内容
+    cut_markers = [
+        '本文由「', '你可能也喜欢这些文章', '评论区', '暂无评论',
+        '寻求报道', '转载说明', '违规转载必究', '本文图片来自：',
+        '寻求免费曝光', '关注36氪', '打开微信分享',
+    ]
+    for marker in cut_markers:
+        idx = text.find(marker)
+        if idx != -1:
+            text = text[:idx]
+    text = text.strip()
+    # 截断到合理长度，尽量在句号处结束
+    max_len = 1000
+    if len(text) > max_len:
+        trunc = text[:max_len]
+        # 找最后一个句号、问号或感叹号
+        last_punct = max(trunc.rfind('。'), trunc.rfind('？'), trunc.rfind('！'), trunc.rfind('\n'))
+        if last_punct > max_len * 0.6:
+            text = trunc[:last_punct + 1]
+        else:
+            text = trunc + '…'
+    return text.strip()
+
+
+def fetch_article_content(item_id):
+    """抓取 36kr 文章详情页正文（通过 mobile 域名绕过 WAF）"""
+    url = f'https://m.36kr.com/p/{item_id}'
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.encoding = resp.apparent_encoding
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        for sel in ['.kr-mobile-article', '.article-body-main', '.body-content-wrapper-main']:
+            el = soup.select_one(sel)
+            if el:
+                for s in el.find_all(['script', 'style']):
+                    s.decompose()
+                text = el.get_text('\n', strip=True)
+                if len(text) > 50:
+                    return clean_article_text(text)
+    except Exception:
+        pass
+    return None
+
+
+def extract_investors_from_text(text):
+    """从文章正文中提取投资机构"""
+    if not text:
+        return []
+    investors = []
+    sentences = re.split(r'[。；\n]', text)
+    for sent in sentences:
+        sent = sent.strip()
+        if not sent or ('融资' not in sent and '投资' not in sent):
+            continue
+        # 贪婪匹配，停在句中最后一个"领投/跟投/投资"
+        pattern = r'由(.{2,300})(?:等[^。；\n]{0,20}跟投|等[^。；\n]{0,20}领投|联合领投|领投|跟投|投资|参投|出资)'
+        for raw in re.findall(pattern, sent):
+            raw = raw.replace('联合领投', '、').replace('领投', '、').replace('跟投', '、').replace('出资', '、').replace('参投', '、')
+            parts = re.split(r'[,，、和与\s]+', raw)
+            for p in parts:
+                p = p.strip()
+                if not p or len(p) < 2 or len(p) > 25:
+                    continue
+                p = re.sub(r'^(由高|由|获|获得|拿到|来自)', '', p)
+                p = p.strip('、，,和与由')
+                if not p:
+                    continue
+                skip_words = {'此', '本轮', '其中', '以及', '等', '多家', '数家', '知名', '头部', '顶级', '国际', '国内', '一线', '原有', '现有', '老股东', '新股东', '财务基金', '股东', '机构'}
+                if p in skip_words or p.startswith('等') or p.endswith('等'):
+                    continue
+                p = re.sub(r'(等多家机构|等财务基金|等股东|等机构)$', '', p)
+                investors.append(p)
+        # 投资方为XXX
+        for raw in re.findall(r'投资方为(.{2,60}?)[。，,；\n]', sent):
+            raw = raw.strip()
+            if raw:
+                parts = re.split(r'[,，、和与\s]+', raw)
+                for p in parts:
+                    p = p.strip()
+                    if p and 2 <= len(p) <= 25 and p not in {'此', '本轮', '其中', '以及', '等', '一家'}:
+                        investors.append(p)
+        # "来自XX的融资"
+        for p in re.findall(r'来自([\u4e00-\u9fa5a-zA-Z0-9（）()]+?)(?:的|数千|数亿|上百万|数百万|数千万|上亿|近亿元|亿元|万元|美元|美金|人民币|融资|投资|注资)', sent):
+            p = p.strip()
+            if p and 2 <= len(p) <= 25 and p not in {'此', '本轮', '其中', '以及', '等', '来自'}:
+                investors.append(p)
+    return list(dict.fromkeys(investors))
+
+
 def fetch_financing_news():
     """抓取融资快讯"""
     headers = {
@@ -213,6 +312,17 @@ def fetch_financing_news():
             round_name = safe_get(project_card, "lastestFinancingRound", "name", default="")
             investors = extract_investors(item, project_card)
 
+            # detail_article 需要从详情页抓取真正正文，并从中提取投资方
+            if route_base == 'detail_article' and item_id:
+                article_text = fetch_article_content(item_id)
+                if article_text:
+                    content = article_text
+                    # 从正文中补充投资机构
+                    text_investors = extract_investors_from_text(article_text)
+                    for inv in text_investors:
+                        if inv not in investors:
+                            investors.append(inv)
+
             # 智能标签：先通过关键词+tradeList提取，再合并结构化标签
             trades = safe_get(project_card, "tradeList", default=[])
             tags = extract_smart_tags(f"{title} {content}", trades)
@@ -222,14 +332,27 @@ def fetch_financing_news():
                     tags.append(t)
             tags = tags[:6]
 
-            # 如果 projectCard 没有公司名，仅尝试从引号中简单提取，避免误识别
+            # 如果 projectCard 没有公司名，尝试从标题提取
             if not company_name:
-                m = re.search(r'[“"「『]([^”"」』]{2,20})[”"」』]', title)
+                # 优先匹配标题开头的公司名：粗门完成... / 攀峰智能完成... / 快快游戏获...
+                m = re.match(r'^([\u4e00-\u9fa5]{2,10})(?:完成|获|获得|拿到|宣布)', title)
                 if m:
                     company_name = m.group(1)
+                else:
+                    # 其次匹配引号中的名称
+                    m = re.search(r'[“"「『]([^”"」』]{2,20})[”"」』]', title)
+                    if m:
+                        company_name = m.group(1)
 
-            # detail_article 的 widgetContent 经常是完全不相关的推荐语，需要过滤
-            if route_base == 'detail_article' and content:
+            # 对 article 类型的公司进行校验：若抓取到了正文，但公司名未出现在正文中，则很可能是误识别
+            if route_base == 'detail_article' and company_name and content and company_name not in content:
+                # 再试试标题里是否真包含这家公司（去除引号后精确子串）
+                clean_title = title.replace('"', '').replace('“', '').replace('”', '').replace('「', '').replace('」', '')
+                if company_name not in clean_title:
+                    company_name = ''
+
+            # detail_article 若详情页抓取失败，widgetContent 又明显不相关，则过滤掉
+            if route_base == 'detail_article' and raw_content:
                 has_company = company_name and company_name in content
                 has_funding = any(kw in content for kw in ['融资', '轮', '投资', '领投', '跟投', '获', '完成', '亿元', '万美元'])
                 if not (has_company or has_funding):
