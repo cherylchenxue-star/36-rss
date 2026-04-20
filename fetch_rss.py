@@ -156,7 +156,7 @@ def clean_article_text(text):
             text = text[:idx]
     text = text.strip()
     # 截断到合理长度，尽量在句号处结束
-    max_len = 1000
+    max_len = 1500
     if len(text) > max_len:
         trunc = text[:max_len]
         # 找最后一个句号、问号或感叹号
@@ -353,8 +353,9 @@ def fetch_financing_news():
                 if company_name not in clean_title:
                     company_name = ''
 
-            # detail_article 若详情页抓取失败，widgetContent 又明显不相关，则过滤掉
-            if route_base == 'detail_article' and raw_content:
+            # detail_article 若详情页抓取失败，原始 widgetContent 又明显不相关，则过滤掉
+            # 注意：只对抓取失败的 article 做此校验；抓取成功的直接信任正文
+            if route_base == 'detail_article' and raw_content and content == raw_content:
                 has_company = company_name and company_name in content
                 has_funding = any(kw in content for kw in ['融资', '轮', '投资', '领投', '跟投', '获', '完成', '亿元', '万美元'])
                 if not (has_company or has_funding):
