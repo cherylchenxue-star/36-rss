@@ -474,130 +474,286 @@ def main():
     with open('public/rss.xml', 'w', encoding='utf-8') as f:
         f.write(rss_content)
 
-    # 生成时间轴 HTML 预览页
-    timeline_items = []
+    # 统计数据
+    total_count = len(items)
+    today_str = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).strftime('%Y-%m-%d')
+    today_count = sum(1 for it in items if it.get('pub_date', '').startswith(today_str))
+
+    # 标签统计
+    tag_counts = {}
+    for it in items:
+        for t in it.get('tags', []):
+            tag_counts[t] = tag_counts.get(t, 0) + 1
+    sorted_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:15]
+
+    # 标签颜色映射
+    TAG_COLORS = {
+        '人工智能': {'color': '#9333ea', 'bg': '#f3e8ff'},
+        '机器人': {'color': '#2563eb', 'bg': '#dbeafe'},
+        '半导体': {'color': '#4f46e5', 'bg': '#e0e7ff'},
+        '新能源': {'color': '#16a34a', 'bg': '#dcfce7'},
+        '电动汽车': {'color': '#ea580c', 'bg': '#ffedd5'},
+        '航空航天': {'color': '#0ea5e9', 'bg': '#e0f2fe'},
+        '生物医药': {'color': '#dc2626', 'bg': '#fee2e2'},
+        '金融科技': {'color': '#ca8a04', 'bg': '#fef9c3'},
+        '企业服务': {'color': '#059669', 'bg': '#d1fae5'},
+        '先进制造': {'color': '#db2777', 'bg': '#fce7f3'},
+        '新材料': {'color': '#7c3aed', 'bg': '#ede9fe'},
+        '物联网/硬件': {'color': '#0891b2', 'bg': '#cffafe'},
+        '消费零售': {'color': '#e11d48', 'bg': '#ffe4e6'},
+        '教育': {'color': '#65a30d', 'bg': '#ecfccb'},
+        '文娱游戏': {'color': '#f59e0b', 'bg': '#fef3c7'},
+        '物流供应链': {'color': '#6366f1', 'bg': '#e0e7ff'},
+        '农业科技': {'color': '#22c55e', 'bg': '#dcfce7'},
+        '能源电力': {'color': '#f97316', 'bg': '#ffedd5'},
+        '环保双碳': {'color': '#14b8a6', 'bg': '#ccfbf1'},
+        '汽车出行': {'color': '#3b82f6', 'bg': '#dbeafe'},
+        '本地生活': {'color': '#ec4899', 'bg': '#fce7f3'},
+        '出海/全球化': {'color': '#8b5cf6', 'bg': '#ede9fe'},
+        '建筑地产': {'color': '#78716c', 'bg': '#f5f5f4'},
+        '网络安全': {'color': '#ef4444', 'bg': '#fee2e2'},
+    }
+
+    def tag_style(tag):
+        tc = TAG_COLORS.get(tag, {'color': '#6b7280', 'bg': '#f3f4f6'})
+        return f'color:{tc["color"]};background:{tc["bg"]};border-color:{tc["color"]}30;'
+
+    # 生成侧边栏标签云
+    tag_cloud_html = ""
+    for name, count in sorted_tags:
+        style = tag_style(name)
+        tag_cloud_html += f'''
+            <button class="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all hover:scale-105 cursor-default" style="{style}">
+              {name} <span class="opacity-60">{count}</span>
+            </button>'''
+
+    # 生成新闻卡片列表
+    now_cst = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8)))
+    cards_html = ""
     for idx, item in enumerate(items[:50]):
+        rank = idx + 1
+        is_top3 = rank <= 3
+
         try:
             dt = datetime.fromisoformat(item['pub_date'].replace('Z', '+00:00'))
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             dt_cst = dt.astimezone(timezone(timedelta(hours=8)))
-            date_str = dt_cst.strftime('%Y-%m-%d')
-            time_str = dt_cst.strftime('%H:%M')
+            date_str = dt_cst.strftime('%Y-%m-%d %H:%M')
+            # 相对时间
+            diff_h = (now_cst - dt_cst).total_seconds() / 3600
+            if diff_h < 1:
+                    time_rel = f"{int(diff_h * 60)}分钟前"
+            elif diff_h < 24:
+                time_rel = f"{int(diff_h)}小时前"
+            else:
+                time_rel = f"{int(diff_h / 24)}天前"
         except:
-            now_cst = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8)))
-            date_str = now_cst.strftime('%Y-%m-%d')
-            time_str = now_cst.strftime('%H:%M')
+            date_str = now_cst.strftime('%Y-%m-%d %H:%M')
+            time_rel = ""
 
+        # 排名徽章
+        if is_top3:
+            rank_badge = f'''<span class="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-700 text-white flex items-center justify-center text-sm font-bold shadow-md">{rank}</span>'''
+        else:
+            rank_badge = f'''<span class="w-7 h-7 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center text-sm font-medium">{rank}</span>'''
+
+        # 标签
         tags_html = ""
         for tag in item.get('tags', [])[:4]:
-            tags_html += f'<span class="px-2 py-0.5 bg-blue-50 text-blue-600 text-xs rounded-full">{tag}</span>'
+            style = tag_style(tag)
+            tags_html += f'''<span class="inline-block px-2 py-0.5 rounded text-xs font-medium border" style="{style}">{tag}</span>'''
 
-        meta = []
-        if item.get('company'):
-            meta.append(f"🏢 {item['company']}")
-        if item.get('round'):
-            meta.append(f"🔄 {item['round']}")
-        if item.get('investors'):
-            meta.append(f"💼 {'、'.join(item['investors'][:3])}")
-        meta_html = " · ".join(meta) if meta else ""
-
+        # 摘要
         summary = item.get('content', '')
-        # 摘要控制在 160 字以内
-        if len(summary) > 160:
-            summary = summary[:160] + "…"
+        if len(summary) > 200:
+            summary = summary[:200] + "…"
 
-        side_class = "md:flex-row" if idx % 2 == 0 else "md:flex-row-reverse"
-        date_align = "md:text-right md:pr-8" if idx % 2 == 0 else "md:text-left md:pl-8"
-        card_align = "md:pl-8" if idx % 2 == 0 else "md:pr-8"
+        # 元信息：公司、轮次、投资方
+        meta_parts = []
+        if item.get('company'):
+            meta_parts.append(f'<span class="text-indigo-600 font-medium">{item["company"]}</span>')
+        if item.get('round'):
+            meta_parts.append(f'<span class="text-gray-500">{item["round"]}</span>')
+        if item.get('investors'):
+            meta_parts.append(f'<span class="text-gray-500">{"、".join(item["investors"][:3])}</span>')
+        meta_html = " · ".join(meta_parts) if meta_parts else ""
 
-        timeline_items.append(f"""
-        <div class="relative flex flex-col {side_class} items-start md:items-stretch mb-8 md:mb-0 md:min-h-[120px]">
-          <!-- 桌面端日期 -->
-          <div class="hidden md:block md:w-1/2 {date_align} pt-1">
-            <div class="text-sm font-semibold text-blue-600">{time_str}</div>
-            <div class="text-xs text-slate-400">{date_str}</div>
-          </div>
-          <!-- 圆点 -->
-          <div class="absolute left-3 md:left-1/2 md:-translate-x-1/2 top-1 w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow z-10"></div>
-          <!-- 内容卡片 -->
-          <div class="pl-10 md:pl-0 md:w-1/2 {card_align} pb-8">
-            <!-- 移动端日期 -->
-            <div class="md:hidden mb-1">
-              <div class="text-sm font-semibold text-blue-600">{time_str}</div>
-              <div class="text-xs text-slate-400">{date_str}</div>
+        cards_html += f'''
+        <article class="bg-white rounded-xl shadow-sm hover:shadow-lg transition-all duration-250 p-5 sm:p-6 border-l-[3px] border-transparent hover:border-l-indigo-500 hover:-translate-y-0.5">
+          <div class="flex items-start gap-4">
+            <div class="flex-shrink-0 mt-0.5">{rank_badge}</div>
+            <div class="flex-1 min-w-0">
+              <a href="{item['link']}" target="_blank" rel="noopener noreferrer" class="group block">
+                <h2 class="text-base sm:text-lg font-semibold text-gray-900 leading-snug group-hover:text-indigo-700 transition-colors" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">
+                  {item['title']}
+                </h2>
+              </a>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                {tags_html}
+              </div>
+              <p class="mt-2.5 text-sm text-gray-500 leading-relaxed" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">
+                {summary}
+              </p>
+              <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-gray-400">
+                {meta_html}
+                <span class="flex items-center space-x-1 ml-auto">
+                  <i class="fa fa-clock-o"></i>
+                  <span>{date_str}</span>
+                </span>
+                {f'<span class="text-gray-500 font-medium">{time_rel}</span>' if time_rel else ''}
+              </div>
             </div>
-            <div class="bg-white rounded-xl p-5 shadow-sm hover:shadow-md transition border border-slate-100">
-              <a href="{item['link']}" target="_blank" class="block text-base font-bold text-slate-900 hover:text-blue-600 mb-2 leading-snug">{item['title']}</a>
-              <div class="flex flex-wrap gap-2 mb-2">{tags_html}</div>
-              <div class="text-xs text-slate-500 mb-2">{meta_html}</div>
-              <p class="text-sm text-slate-600 leading-relaxed">{summary}</p>
-            </div>
           </div>
-        </div>
-        """)
+        </article>
+        '''
 
-    timeline_html = "\n".join(timeline_items)
+    update_time = now_cst.strftime('%Y-%m-%d %H:%M')
 
-    html = f"""<!DOCTYPE html>
+    html = f'''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>36kr 融资快讯 RSS</title>
+  <title>每日融资动态</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap">
   <style>
-    .timeline-line {{
-      position: absolute;
-      left: 0.875rem;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background: linear-gradient(to bottom, #bfdbfe, #60a5fa, transparent);
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif; }}
+    .headline-font {{ font-family: 'Noto Serif SC', Georgia, serif; }}
+    .gradient-header {{
+      background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4338ca 100%);
     }}
-    @media (min-width: 768px) {{
-      .timeline-line {{
-        left: 50%;
-        transform: translateX(-50%);
-      }}
+    .live-indicator {{
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }}
+    @keyframes pulse {{
+      0%, 100% {{ opacity: 1; }}
+      50% {{ opacity: 0.4; }}
+    }}
+    .shadow-card {{
+      box-shadow: 0 1px 3px 0 rgba(0,0,0,0.05), 0 4px 12px 0 rgba(0,0,0,0.08);
     }}
   </style>
 </head>
-<body class="bg-gradient-to-br from-slate-50 to-slate-100 text-slate-800 min-h-screen">
-  <div class="max-w-5xl mx-auto px-4 py-12">
-    <!-- Header -->
-    <div class="text-center mb-12">
-      <h1 class="text-3xl font-bold text-slate-900 mb-2">36kr 融资快讯</h1>
-      <p class="text-slate-500 mb-6">最新一级市场股权融资动态</p>
-      <div class="inline-flex flex-wrap items-center justify-center gap-3 bg-white px-6 py-3 rounded-full shadow-sm">
-        <span class="text-sm text-slate-600">当前数据: <strong class="text-slate-900">{len(items)}</strong> 条</span>
-        <span class="hidden sm:inline w-px h-4 bg-slate-200"></span>
-        <span class="text-sm text-slate-400">更新于 {datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M')}</span>
-      </div>
-      <div class="mt-5 flex flex-wrap items-center justify-center gap-3">
-        <a href="rss.xml" class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-full text-sm font-medium transition shadow-sm">
-          <i class="fa fa-rss"></i> RSS 订阅
-        </a>
-        <a href="https://github.com/cherylchenxue-star/36-rss/actions/workflows/update-rss.yml" target="_blank" class="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white px-5 py-2 rounded-full text-sm font-medium transition shadow-sm">
-          <i class="fa fa-refresh"></i> 手动刷新
-        </a>
-      </div>
-      <p class="text-xs text-slate-400 mt-2">手动刷新将跳转 GitHub Actions 执行最新抓取</p>
-    </div>
+<body class="bg-gray-50 min-h-screen">
 
-    <!-- Timeline -->
-    <div class="relative">
-      <div class="timeline-line"></div>
-      {timeline_html}
+  <!-- 顶部导航 -->
+  <header class="gradient-header text-white shadow-lg sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 bg-white/15 rounded-lg flex items-center justify-center backdrop-blur">
+            <i class="fa fa-line-chart text-yellow-400 text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold tracking-wide headline-font">每日融资动态</h1>
+            <p class="text-xs text-indigo-200 -mt-0.5">聚合 36kr PitchHub 最新一级市场融资</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-4">
+          <div class="hidden sm:flex items-center space-x-2 text-sm text-indigo-200">
+            <span class="w-2 h-2 bg-green-400 rounded-full live-indicator"></span>
+            <span>{update_time}</span>
+          </div>
+          <a href="rss.xml" target="_blank"
+             class="hidden sm:flex items-center space-x-1.5 bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg text-sm transition-colors backdrop-blur">
+            <i class="fa fa-rss text-orange-300"></i>
+            <span>RSS 订阅</span>
+          </a>
+        </div>
+      </div>
     </div>
+  </header>
 
-    <p class="text-center text-slate-400 text-sm mt-8 pb-8">
-      数据来源于 <a href="https://pitchhub.36kr.com/financing-flash" class="text-blue-600 hover:underline">36kr PitchHub</a>
-    </p>
+  <!-- 统计栏 -->
+  <div class="bg-white border-b border-gray-200 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <div class="flex items-center space-x-6 text-sm">
+          <div class="flex items-center space-x-2">
+            <i class="fa fa-newspaper-o text-gray-400"></i>
+            <span class="text-gray-500">今日融资</span>
+            <span class="font-bold text-indigo-700 text-lg">{total_count}</span>
+            <span class="text-gray-400">条</span>
+          </div>
+          <div class="hidden sm:flex items-center space-x-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+            <span class="text-gray-500">今日新增</span>
+            <span class="font-semibold text-gray-700">{today_count}</span>
+          </div>
+          <div class="hidden sm:flex items-center space-x-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+            <span class="text-gray-500">标签</span>
+            <span class="font-semibold text-gray-700">{len(tag_counts)}</span>
+          </div>
+        </div>
+        <a href="https://github.com/cherylchenxue-star/36-rss/actions/workflows/update-rss.yml" target="_blank"
+           class="flex items-center space-x-1.5 text-sm text-gray-500 hover:text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+          <i class="fa fa-refresh"></i>
+          <span>手动刷新</span>
+        </a>
+      </div>
+    </div>
   </div>
+
+  <!-- 主体内容 -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div class="flex flex-col lg:flex-row gap-6">
+
+      <!-- 左侧：新闻列表 -->
+      <div class="flex-1 min-w-0">
+        <div id="news-list" class="space-y-4">
+          {cards_html}
+        </div>
+      </div>
+
+      <!-- 右侧：侧边栏 -->
+      <aside class="w-full lg:w-80 space-y-5">
+        <!-- 热门标签 -->
+        <div class="bg-white rounded-xl shadow-card p-5">
+          <h3 class="text-sm font-bold text-gray-800 mb-4 flex items-center">
+            <i class="fa fa-tags text-indigo-500 mr-2"></i>
+            热门赛道
+          </h3>
+          <div class="flex flex-wrap gap-2">
+            {tag_cloud_html}
+          </div>
+        </div>
+
+        <!-- 关于 -->
+        <div class="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-5 border border-indigo-100">
+          <h3 class="text-sm font-bold text-indigo-800 mb-2">关于本站</h3>
+          <p class="text-xs text-indigo-600/80 leading-relaxed">
+            自动抓取 36kr PitchHub 最新一级市场股权融资动态，智能提取赛道标签与投资机构，助你第一时间掌握创投市场核心风向。
+          </p>
+          <div class="mt-3 flex items-center space-x-3">
+            <a href="rss.xml" target="_blank"
+               class="inline-flex items-center space-x-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+              <i class="fa fa-rss"></i>
+              <span>RSS 源</span>
+            </a>
+            <span class="text-indigo-300">|</span>
+            <span class="text-xs text-indigo-500/60">数据每 5h 更新</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <!-- 底部 -->
+  <footer class="bg-white border-t border-gray-200 mt-12">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div class="flex flex-col sm:flex-row items-center justify-between text-xs text-gray-400">
+        <p>每日融资动态 · 数据源自 <a href="https://pitchhub.36kr.com/financing-flash" target="_blank" class="text-indigo-500 hover:underline">36kr PitchHub</a></p>
+        <p class="mt-2 sm:mt-0">仅供信息参考，不代表本站立场</p>
+      </div>
+    </div>
+  </footer>
+
 </body>
-</html>"""
+</html>'''
 
     with open('public/index.html', 'w', encoding='utf-8') as f:
         f.write(html)
