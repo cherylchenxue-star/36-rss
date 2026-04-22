@@ -238,6 +238,25 @@ def extract_investors_from_text(text):
     return list(dict.fromkeys(investors))
 
 
+def extract_amount_from_text(text):
+    """从文章正文中提取融资金额（含币种单位）"""
+    if not text:
+        return ""
+    # 先尝试匹配标题/正文中常见的金额表述
+    amount_pattern = r'(?:超|近|上|过|约|达|共|累计|至少)?(?:\d+(?:\.\d+)?|数)?(?:[万亿千百])+(?:多)?(?:元|人民币|美元|美金|港元|港币)'
+    matches = re.findall(amount_pattern, text)
+    # 去重并过滤掉纯"亿元"等过于宽泛的（保留带数字或修饰词的）
+    seen = set()
+    results = []
+    for m in matches:
+        # 过滤只有量词+元的（如单独的"亿元"在句中容易误匹配，但"过亿元"可以保留）
+        if re.search(r'(?:\d|数|超|近|上|过|约|达|共|累计|至少)', m):
+            if m not in seen:
+                seen.add(m)
+                results.append(m)
+    return results[0] if results else ""
+
+
 def fetch_financing_news():
     """抓取融资快讯"""
     headers = {
@@ -325,6 +344,9 @@ def fetch_financing_news():
                     if inv not in investors:
                         investors.append(inv)
 
+            # 从标题+正文中提取融资金额
+            amount = extract_amount_from_text(f"{title} {content}")
+
             # 智能标签：先通过关键词+tradeList提取，再合并结构化标签
             trades = safe_get(project_card, "tradeList", default=[])
             tags = extract_smart_tags(f"{title} {content}", trades)
@@ -386,6 +408,7 @@ def fetch_financing_news():
                 'investors': investors,
                 'tags': tags,
                 'content': content,
+                'amount': amount,
             })
 
         items.sort(key=lambda x: x.get('pub_date', ''), reverse=True)
@@ -432,6 +455,8 @@ def generate_rss(items):
             extra_xml += f"\n            <kr:company><![CDATA[{item['company']}]]></kr:company>"
         if item.get('round'):
             extra_xml += f"\n            <kr:round><![CDATA[{item['round']}]]></kr:round>"
+        if item.get('amount'):
+            extra_xml += f"\n            <kr:amount><![CDATA[{item['amount']}]]></kr:amount>"
 
         items_xml += f"""
         <item>
@@ -570,12 +595,14 @@ def main():
         if len(summary) > 200:
             summary = summary[:200] + "…"
 
-        # 元信息：公司、轮次、投资方
+        # 元信息：公司、轮次、投资方、金额
         meta_parts = []
         if item.get('company'):
             meta_parts.append(f'<span class="text-indigo-600 font-medium">{item["company"]}</span>')
         if item.get('round'):
             meta_parts.append(f'<span class="text-gray-500">{item["round"]}</span>')
+        if item.get('amount'):
+            meta_parts.append(f'<span class="text-orange-600 font-semibold">{item["amount"]}</span>')
         if item.get('investors'):
             meta_parts.append(f'<span class="text-gray-500">{"、".join(item["investors"][:3])}</span>')
         meta_html = " · ".join(meta_parts) if meta_parts else ""
