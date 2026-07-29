@@ -1,0 +1,19 @@
+name: Keepalive
+
+# 防止 GitHub 因仓库60天无人工活动而自动禁用定时工作流
+on:
+  schedule:
+    - cron: '17 3 5,20 * *'   # 每月5日、20日运行
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: gautamkrishnar/keepalive-workflow@v2
+        with:
+          time_elapsed: 45
